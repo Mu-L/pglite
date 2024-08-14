@@ -11,7 +11,8 @@ agent:
 steps:
   - label: '🚀 Build & publish the builder image to Docker Hub'
     command:
-      - source .buildconfig
+      - |
+        source ./.buildconfig && echo $PG_VERSION
       - export IMGNAME="electricsql/pglite"
       - export IMGTAG="${PG_VERSION}_${SDK_VERSION}"
       - |
@@ -19,9 +20,9 @@ steps:
           echo "Image $${IMGNAME}:$${IMGTAG} already exists on Docker Hub. Exiting successfully."
           exit 0
         fi
-      - docker buildx build --platform linux/arm64/v8,linux/amd64 --push
-        --build-arg PG_VERSION=$${PG_VERSION}
-        --build-arg SDK_VERSION=$${SDK_VERSION}
-        -t $${IMGNAME}:$${IMGTAG}
-        -t $${IMGNAME}:latest
-        .
+      # - docker buildx build --platform linux/arm64/v8,linux/amd64 --push
+      #   --build-arg PG_VERSION=$${PG_VERSION}
+      #   --build-arg SDK_VERSION=$${SDK_VERSION}
+      #   -t $${IMGNAME}:$${IMGTAG}
+      #   -t $${IMGNAME}:latest
+      #   .
