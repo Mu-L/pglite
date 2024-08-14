@@ -32,7 +32,7 @@ jobs:
       - name: Log build parameters and set image tag
         run: |
           echo "Building with PG_VERSION=${PG_VERSION} and SDK_VERSION=${SDK_VERSION}"
-          echo "IMGTAG=$${PG_VERSION}_${SDK_VERSION}" >> $GITHUB_ENV
+          echo "IMGTAG=${PG_VERSION}_${SDK_VERSION}" >> $GITHUB_ENV
 
       - name: Check if image exists
         id: image-exists

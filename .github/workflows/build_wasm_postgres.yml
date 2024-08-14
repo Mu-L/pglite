@@ -27,7 +27,9 @@ jobs:
           fetch-depth: 1
 
       - name: Set build parameters
-        run: cat ${{ env.BUILD_CONFIG_FILE }} >> $GITHUB_ENV
+        run: |
+          cat ${{ env.BUILD_CONFIG_FILE }} >> $GITHUB_ENV
+          echo "PGVERSION=${PG_VERSION}" >> $GITHUB_ENV
 
       - name: Restore cached build
         id: cache-restore
