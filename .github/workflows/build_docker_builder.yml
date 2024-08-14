@@ -11,26 +11,28 @@ on:
         description: 'Build PGlite builder Docker image'
   push:
     branches: ['main']
+    paths:
+      - .buildconfig
   pull_request:
+    paths:
+      - .buildconfig
 
 env:
-  DOCKERHUB_REPO: electricsql
-  IMAGE_NAME: pglite-builder
+  BUILD_CONFIG_FILE: .buildconfig
+  IMGNAME: electricsql/pglite-builder
 
 jobs:
   build:
     name: Build Docker image
     runs-on: ubuntu-22.04
-    environment: PGlite Build Parameters
-    env:
-      PG_VERSION: ${{ vars.PG_VERSION }}
-      SDK_VERSION: ${{ vars.PYTHON_WASM_SDK_VERSION }}
-      IMGNAME: electricsql/pglite-builder
-      IMGTAG: ${{ vars.PG_VERSION }}_${{ vars.PYTHON_WASM_SDK_VERSION }}
     steps:
-      - name: Log build parameters
+      - uses: actions/checkout@v4
+      - name: Set build parameters
+        run: cat ${{ env.BUILD_CONFIG_FILE }} >> $GITHUB_ENV
+      - name: Log build parameters and set image tag
         run: |
           echo "Building with PG_VERSION=${PG_VERSION} and SDK_VERSION=${SDK_VERSION}"
+          echo "IMGTAG=$${PG_VERSION}_${SDK_VERSION}" >> $GITHUB_ENV
 
       - name: Check if image exists
         id: image-exists
@@ -47,9 +49,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        if: steps.image-exists.outputs.exists == 'false'
-
-      - uses: actions/checkout@v4
         if: steps.image-exists.outputs.exists == 'false'
 
       - name: Login to Docker Hub

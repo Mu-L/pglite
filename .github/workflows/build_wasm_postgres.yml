@@ -12,10 +12,8 @@ jobs:
   build:
     name: Build WASM Postgres
     runs-on: ubuntu-22.04
-    environment: PGlite Build Parameters
     env:
-      PGVERSION: ${{ vars.PG_VERSION }}
-      SDK_VERSION: ${{ vars.PYTHON_WASM_SDK_VERSION }}
+      BUILD_CONFIG_FILE: .buildconfig
       SDK_ARCHIVE: python3.12-wasm-sdk-Ubuntu-22.04.tar.lz4
       SDKROOT: /opt/python-wasm-sdk
       SYS_PYTHON: /usr/bin/python3
@@ -27,6 +25,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Set build parameters
+        run: cat ${{ env.BUILD_CONFIG_FILE }} >> $GITHUB_ENV
 
       - name: Restore cached build
         id: cache-restore
