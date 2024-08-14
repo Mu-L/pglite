@@ -16,7 +16,7 @@ steps:
         export SDK_VERSION=$$SDK_VERSION
         export IMGNAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
         export IMGTAG="$${PG_VERSION}_$${SDK_VERSION}"
-      - echo $$IMGNAME $$IMGTAG $$PG_VERSION $$SDK_VERSION
+      - echo "Building with PG_VERSION $$PG_VERSION and SDK_VERSION $$SDK_VERSION"
       - |
         if docker manifest inspect $${IMGNAME}:$${IMGTAG} >/dev/null 2>&1; then
           echo "Image $${IMGNAME}:$${IMGTAG} already exists on Docker Hub. Exiting successfully."
