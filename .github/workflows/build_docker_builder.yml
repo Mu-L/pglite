@@ -58,6 +58,6 @@ jobs:
           docker buildx build --platform linux/arm64/v8,linux/amd64 --push \
             --build-arg PG_VERSION=$PG_VERSION \
             --build-arg SDK_VERSION=$SDK_VERSION \
-            -t $${PGLITE_BUILDER_IMAGE_NAME}:$${BUILDER_VERSION} \
-            -t $${PGLITE_BUILDER_IMAGE_NAME}:latest \
+            -t ${PGLITE_BUILDER_IMAGE_NAME}:${BUILDER_VERSION} \
+            -t ${PGLITE_BUILDER_IMAGE_NAME}:latest \
             .
