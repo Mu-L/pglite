@@ -47,17 +47,26 @@ jobs:
             echo "::set-output name=exists::false"
           fi
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        if: steps.image-exists.outputs.exists == 'false'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        if: steps.image-exists.outputs.exists == 'false'
+
       - uses: actions/checkout@v4
         if: steps.image-exists.outputs.exists == 'false'
 
-      - name: Build and push Docker image
+      - name: Build and push
+        uses: docker/build-push-action@v6
         if: steps.image-exists.outputs.exists == 'false'
-        run: |
-          export PGLITE_BUILDER_IMAGE_NAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
-          export BUILDER_VERSION="${PG_VERSION}-${SDK_VERSION}"
-          docker buildx build --platform linux/arm64/v8,linux/amd64 --push \
-            --build-arg PG_VERSION=$PG_VERSION \
-            --build-arg SDK_VERSION=$SDK_VERSION \
-            -t ${PGLITE_BUILDER_IMAGE_NAME}:${BUILDER_VERSION} \
-            -t ${PGLITE_BUILDER_IMAGE_NAME}:latest \
-            .
+        with:
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            PG_VERSION=${PG_VERSION}
+            SDK_VERSION=${SDK_VERSION}
+          tags: |
+            ${PGLITE_BUILDER_IMAGE_NAME}:${BUILDER_VERSION}
+            ${PGLITE_BUILDER_IMAGE_NAME}:latest
