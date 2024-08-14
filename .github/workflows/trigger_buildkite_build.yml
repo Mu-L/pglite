@@ -5,9 +5,9 @@ on:
     branches: ['main']
     paths:
       - .buildconfig
-  # pull_request:
-  #   paths:
-  #     - .buildconfig
+  pull_request:
+    paths:
+      - .buildconfig
 
 jobs:
   build:
@@ -22,3 +22,4 @@ jobs:
           branch: ${{ github.head_ref || github.ref_name }}
           commit: HEAD
           message: '🚀 Triggered from a GitHub Action'
+          build_env_vars: '{"TRIGGERED_FROM_GHA": "true"}'
