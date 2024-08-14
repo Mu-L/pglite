@@ -1,8 +1,6 @@
 env:
   DOCKERHUB_REPO: electricsql
   IMAGE_NAME: pglite-builder
-  PG_VERSION: dummy
-  SDK_VERSION: dummy
 
 agent:
   docker: true
