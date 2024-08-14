@@ -7,8 +7,6 @@ agent:
   gcp: true
 
 steps:
-  - label: 'Set environment variables'
-
   - label: '🚀 Build & publish the builder image to Docker Hub'
     command:
       - cat .buildconfig
