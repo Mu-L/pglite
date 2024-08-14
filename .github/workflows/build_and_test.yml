@@ -16,8 +16,7 @@ on:
         description: 'Build PGLite packages'
   push:
     branches: ['main']
-  #TMP: disable
-  #pull_request:
+  pull_request:
 
 jobs:
   stylecheck:
