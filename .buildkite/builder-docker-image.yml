@@ -14,8 +14,8 @@ steps:
         echo $$PG_VERSION
         export PG_VERSION=$$PG_VERSION
         export SDK_VERSION=$$SDK_VERSION
-      - export IMGNAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
-      - export IMGTAG="${PG_VERSION}_${SDK_VERSION}"
+        export IMGNAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
+        export IMGTAG="$${PG_VERSION}_$${SDK_VERSION}"
       - echo $$IMGNAME $$IMGTAG $$PG_VERSION $$SDK_VERSION
       - |
         if docker manifest inspect $${IMGNAME}:$${IMGTAG} >/dev/null 2>&1; then
