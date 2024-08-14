@@ -13,9 +13,9 @@ on:
     branches: ['main']
     paths:
       - .buildconfig
-  pull_request:
-    paths:
-      - .buildconfig
+  # pull_request:
+  #   paths:
+  #     - .buildconfig
 
 env:
   BUILD_CONFIG_FILE: .buildconfig

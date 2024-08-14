@@ -10,11 +10,18 @@ steps:
   - label: '🚀 Build & publish the builder image to Docker Hub'
     command:
       - source .buildconfig
-      - export PGLITE_BUILDER_IMAGE_NAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
-      - export BUILDER_VERSION="${PG_VERSION}_${SDK_VERSION}"
+      - export IMGNAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
+      - export IMGTAG="${PG_VERSION}_${SDK_VERSION}"
+      - if docker manifest inspect ${{IMGNAME}}:${{IMGTAG}} > /dev/null 2>&1; then
+        echo "Image ${{IMGNAME}}:${{IMGTAG}} already exists - terminating"
+        exit 0
+        else
+        echo "Image ${{IMGNAME}}:${{IMGTAG}} does not exist - building and pushing to Dockerhub"
+        fi
+      - source .buildconfig
       - docker buildx build --platform linux/arm64/v8,linux/amd64 --push
         --build-arg PG_VERSION=$${PG_VERSION}
         --build-arg SDK_VERSION=$${SDK_VERSION}
-        -t $${PGLITE_BUILDER_IMAGE_NAME}:$${BUILDER_VERSION}
-        -t $${PGLITE_BUILDER_IMAGE_NAME}:latest
+        -t $${IMGNAME}:$${IMGTAG}
+        -t $${IMGNAME}:latest
         .
