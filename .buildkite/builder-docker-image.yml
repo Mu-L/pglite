@@ -1,7 +1,3 @@
-env:
-  DOCKERHUB_REPO: electricsql
-  IMAGE_NAME: pglite-builder
-
 agent:
   docker: true
   gcp: true
@@ -13,8 +9,8 @@ steps:
         source .buildconfig
         export PG_VERSION=${PG_VERSION}
         export SDK_VERSION=${SDK_VERSION}
-      - export IMGNAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
-      - export IMGTAG="${PG_VERSION}_${SDK_VERSION}"
+        export IMGNAME="electricsql/pglite-builder"
+        export IMGTAG="${PG_VERSION}_${SDK_VERSION}"
       - |
         if docker manifest inspect $${IMGNAME}:$${IMGTAG} >/dev/null 2>&1; then
           echo "Image $${IMGNAME}:$${IMGTAG} already exists on Docker Hub. Exiting successfully."
