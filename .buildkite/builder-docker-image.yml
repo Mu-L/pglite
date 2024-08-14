@@ -12,9 +12,11 @@ steps:
       - cat .buildconfig
       - echo "xargs" && export $(xargs < .buildconfig) && echo $PG_VERSION
       - echo "source" && source ./.buildconfig && echo $PG_VERSION
-      - echo "eval" && eval $(cat .buildconfig | sed 's/^/export /') && echo $PG_VERSION
-      - export IMGNAME="electricsql/pglite"
+      - cat .buildconfig | sed 's/^/export /' > .env
+      - source .env
+      - export IMGNAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
       - export IMGTAG="${PG_VERSION}_${SDK_VERSION}"
+      - echo $IMGNAME $IMGTAG $PG_VERSION $SDK_VERSION
       - |
         if docker manifest inspect $${IMGNAME}:$${IMGTAG} >/dev/null 2>&1; then
           echo "Image $${IMGNAME}:$${IMGTAG} already exists on Docker Hub. Exiting successfully."
