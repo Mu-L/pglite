@@ -36,10 +36,6 @@ jobs:
           echo "IMGNAME=${{ env.DOCKERHUB_REPO }}/${{ env.IMAGE_NAME }}" >> $GITHUB_ENV
           echo "IMGTAG=${{ env.PG_VERSION }}_${{ env.SDK_VERSION }}" >> $GITHUB_ENV
 
-      - name: Check if image exists test
-        continue-on-error: true
-        run: docker manifest inspect ${{ env.DOCKERHUB_REPO }}/${{ env.IMAGE_NAME }}:${{ env.PG_VERSION }}-${{ env.SDK_VERSION }}
-
       - name: Check if image exists
         id: image-exists
         run: |
@@ -59,9 +55,9 @@ jobs:
         run: |
           export PGLITE_BUILDER_IMAGE_NAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
           export BUILDER_VERSION="${PG_VERSION}-${SDK_VERSION}"
-          docker buildx build --platform linux/arm64/v8,linux/amd64 --push
-            --build-arg PG_VERSION=$PG_VERSION
-            --build-arg SDK_VERSION=$SDK_VERSION
-            -t $${PGLITE_BUILDER_IMAGE_NAME}:$${BUILDER_VERSION}
-            -t $${PGLITE_BUILDER_IMAGE_NAME}:latest
+          docker buildx build --platform linux/arm64/v8,linux/amd64 --push \
+            --build-arg PG_VERSION=$PG_VERSION \
+            --build-arg SDK_VERSION=$SDK_VERSION \
+            -t $${PGLITE_BUILDER_IMAGE_NAME}:$${BUILDER_VERSION} \
+            -t $${PGLITE_BUILDER_IMAGE_NAME}:latest \
             .
