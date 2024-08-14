@@ -25,26 +25,20 @@ jobs:
     env:
       PG_VERSION: ${{ vars.PG_VERSION }}
       SDK_VERSION: ${{ vars.PYTHON_WASM_SDK_VERSION }}
+      IMGNAME: electricsql/pglite-builder
+      IMGTAG: ${{ vars.PG_VERSION }}_${{ vars.PYTHON_WASM_SDK_VERSION }}
     steps:
       - name: Log build parameters
         run: |
           echo "Building with PG_VERSION=${PG_VERSION} and SDK_VERSION=${SDK_VERSION}"
 
-      - name: Set image name and tag
-        id: set-image-name
-        run: |
-          echo "IMGNAME=${{ env.DOCKERHUB_REPO }}/${{ env.IMAGE_NAME }}" >> $GITHUB_ENV
-          echo "IMGTAG=${{ env.PG_VERSION }}_${{ env.SDK_VERSION }}" >> $GITHUB_ENV
-
       - name: Check if image exists
         id: image-exists
         run: |
-          if docker manifest inspect ${{ env.DOCKERHUB_REPO }}/${{ env.IMAGE_NAME }}:${{ env.PG_VERSION }}-${{ env.SDK_VERSION }} > /dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_ENV
-            echo "::set-output name=exists::true"
+          if docker manifest inspect ${{ env.IMGNAME }}:${{ env.IMGTAG }} > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
           else
-            echo "exists=false" >> $GITHUB_ENV
-            echo "::set-output name=exists::false"
+            echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Set up QEMU
@@ -65,8 +59,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            PG_VERSION=${PG_VERSION}
-            SDK_VERSION=${SDK_VERSION}
+            PG_VERSION=${{ env.PG_VERSION }}
+            SDK_VERSION=${{ env.SDK_VERSION }}
           tags: |
-            ${IMGNAME}:${IMGTAG}
-            ${IMGNAME}:latest
+            ${{ env.IMGNAME }}:${{ env.IMGTAG }}
+            ${{ env.IMGNAME }}:latest
