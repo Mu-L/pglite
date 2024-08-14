@@ -7,15 +7,16 @@ agent:
   gcp: true
 
 steps:
+  - label: 'Set environment variables'
+
   - label: '🚀 Build & publish the builder image to Docker Hub'
     command:
       - cat .buildconfig
-      - echo "xargs" && export $(xargs < .buildconfig) && echo $PG_VERSION
-      - echo "source" && source ./.buildconfig && echo $PG_VERSION
-      - cat .buildconfig | sed 's/^/export /' > .env
-      - source .env
+      - echo "xargs" && export $(xargs < .buildconfig) && echo $$PG_VERSION
+      - echo "source" && source ./.buildconfig && echo $$PG_VERSION
+      - echo "eval" && eval $(cat .buildconfig | sed 's/^/export /') && echo $$PG_VERSION
       - export IMGNAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
-      - export IMGTAG="${PG_VERSION}_${SDK_VERSION}"
+      - export IMGTAG="$${PG_VERSION}_$${SDK_VERSION}"
       - echo $IMGNAME $IMGTAG $PG_VERSION $SDK_VERSION
       - |
         if docker manifest inspect $${IMGNAME}:$${IMGTAG} >/dev/null 2>&1; then
