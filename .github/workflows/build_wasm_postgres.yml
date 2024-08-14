@@ -28,9 +28,11 @@ jobs:
 
       - name: Set build parameters
         run: |
-          set -a && . ${{ env.BUILD_CONFIG_FILE }} && set +a
           cat ${{ env.BUILD_CONFIG_FILE }} >> $GITHUB_ENV
-          echo "PGVERSION=${PG_VERSION}" >> $GITHUB_ENV
+
+      # HACK: for some reason build uses PGVERSION which is uglier than PG_VERSION
+      - name: Set PGVERSION from PG_VERSION
+        run: echo "PGVERSION=${PG_VERSION}" >> $GITHUB_ENV
 
       - name: Restore cached build
         id: cache-restore
