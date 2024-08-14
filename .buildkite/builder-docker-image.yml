@@ -10,8 +10,9 @@ steps:
   - label: '🚀 Build & publish the builder image to Docker Hub'
     command:
       - cat .buildconfig
-      - echo "xargs" && export $(xargs < .buildconfig) && echo ${{PG_VERSION}}
-      - echo "source" && source ./.buildconfig && echo ${{PG_VERSION}}
+      - echo "xargs" && export $(xargs < .buildconfig) && echo $PG_VERSION
+      - echo "source" && source ./.buildconfig && echo $PG_VERSION
+      - echo "eval" && eval $(cat .env | sed 's/^/export /') && echo $PG_VERSION
       - export IMGNAME="electricsql/pglite"
       - export IMGTAG="${PG_VERSION}_${SDK_VERSION}"
       - |
