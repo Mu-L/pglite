@@ -8,7 +8,7 @@ agent:
 
 steps:
   - label: '🚀 Build & publish the builder image to Docker Hub'
-    if: build.env().TRIGGERED_FROM_GHA == 'true'
+    if: build.env("TRIGGERED_FROM_GHA") == 'true'
     command:
       - |
         source ./.buildconfig
