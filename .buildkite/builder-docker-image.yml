@@ -9,7 +9,9 @@ agent:
 steps:
   - label: '🚀 Build & publish the builder image to Docker Hub'
     command:
-      - cat .buildconfig
+      - cat ./.buildconfig
+      - cat ./.buildconfig > echo
+      - (ls .buildconfig && echo yes) || echo no
       - source .buildconfig
       - export IMGNAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
       - export IMGTAG="${PG_VERSION}_${SDK_VERSION}"
