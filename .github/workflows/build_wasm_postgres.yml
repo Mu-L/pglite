@@ -12,9 +12,10 @@ jobs:
   build:
     name: Build WASM Postgres
     runs-on: ubuntu-22.04
+    environment: PGlite Build Parameters
     env:
-      PGVERSION: 16.3
-      SDK_VERSION: 3.1.65.6bi
+      PGVERSION: ${{ vars.PG_VERSION }}
+      SDK_VERSION: ${{ vars.PYTHON_WASM_SDK_VERSION }}
       SDK_ARCHIVE: python3.12-wasm-sdk-Ubuntu-22.04.tar.lz4
       SDKROOT: /opt/python-wasm-sdk
       SYS_PYTHON: /usr/bin/python3

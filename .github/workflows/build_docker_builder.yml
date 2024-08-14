@@ -1,0 +1,65 @@
+name: Build Docker image for building PGlite
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Build PGlite builder Docker image'
+  push:
+    branches: ['main']
+  pull_request:
+
+env:
+  DOCKERHUB_REPO: electricsql
+  IMAGE_NAME: pglite-builder
+
+jobs:
+  build:
+    name: Build Docker image
+    runs-on: ubuntu-22.04
+    environment: PGlite Build Parameters
+    env:
+      PG_VERSION: ${{ vars.PG_VERSION }}
+      SDK_VERSION: ${{ vars.PYTHON_WASM_SDK_VERSION }}
+    steps:
+      - name: Log build parameters
+        run: |
+          echo "Building with PG_VERSION=${PG_VERSION} and SDK_VERSION=${SDK_VERSION}"
+
+      - name: Set image name and tag
+        id: set-image-name
+        run: |
+          echo "IMGNAME=${{ env.DOCKERHUB_REPO }}/${{ env.IMAGE_NAME }}" >> $GITHUB_ENV
+          echo "IMGTAG=${{ env.PG_VERSION }}-${{ env.SDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Check if image exists already
+        id: image-exists
+        run: |
+          docker manifest inspect ${{ env.IMGNAME }}:${{ env.IMGTAG }} > /dev/null 2>&1 && echo "exists=true" || echo "exists=false"
+        continue-on-error: true
+        shell: bash
+
+      - name: Set output for image-exists
+        id: set-output
+        run: |
+          echo "::set-output name=exists::$(docker manifest inspect ${{ env.IMGNAME }}:${{ env.IMGTAG }} > /dev/null 2>&1 && echo true || echo false)"
+        shell: bash
+
+      - uses: actions/checkout@v4
+        if: steps.image-exists.outputs.exists == 'false'
+
+      - name: Build and push Docker image
+        if: steps.image-exists.outputs.exists == 'false'
+        run: |
+          export PGLITE_BUILDER_IMAGE_NAME="${DOCKERHUB_REPO}/${IMAGE_NAME}"
+          export BUILDER_VERSION="${PG_VERSION}-${SDK_VERSION}"
+          docker buildx build --platform linux/arm64/v8,linux/amd64 --push
+            --build-arg PG_VERSION=$PG_VERSION
+            --build-arg SDK_VERSION=$SDK_VERSION
+            -t $${PGLITE_BUILDER_IMAGE_NAME}:$${BUILDER_VERSION}
+            -t $${PGLITE_BUILDER_IMAGE_NAME}:latest
+            .
