@@ -68,5 +68,5 @@ jobs:
             PG_VERSION=${PG_VERSION}
             SDK_VERSION=${SDK_VERSION}
           tags: |
-            ${PGLITE_BUILDER_IMAGE_NAME}:${BUILDER_VERSION}
-            ${PGLITE_BUILDER_IMAGE_NAME}:latest
+            ${IMGNAME}:${IMGTAG}
+            ${IMGNAME}:latest
