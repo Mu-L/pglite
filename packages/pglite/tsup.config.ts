@@ -16,20 +16,10 @@ const replaceAssertPlugin = {
   },
 }
 
-const replaceBuffer = {
-  name: 'replace-buffer',
-  setup(build: any) {
-    // Resolve `assert` to our buffer polyfill
-    build.onResolve({ filter: /^(node:)?buffer$/ }, (_args: any) => {
-      return { path: path.join(root, 'src', 'polyfills', 'buffer.ts') }
-    })
-  },
-}
-
 const entryPoints = [
   'src/index.ts',
   'src/fs/nodefs.ts',
-  'src/fs/opfs-ahp/index.ts',
+  'src/fs/opfs-ahp.ts',
   'src/templating.ts',
   'src/live/index.ts',
   'src/vector/index.ts',
@@ -54,7 +44,7 @@ export default defineConfig([
     },
     clean: true,
     external: ['../release/postgres.js', '../release/postgres.cjs'],
-    esbuildPlugins: [replaceAssertPlugin, replaceBuffer],
+    esbuildPlugins: [replaceAssertPlugin],
     minify: true,
     shims: true, // Convert import.meta.url to a shim for CJS
     format: ['esm', 'cjs'],

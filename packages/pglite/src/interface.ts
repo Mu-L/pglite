@@ -1,5 +1,8 @@
-import type { BackendMessage, NoticeMessage } from 'pg-protocol/src/messages.js'
-import type { Filesystem } from './fs/types.js'
+import type {
+  BackendMessage,
+  NoticeMessage,
+} from '@electric-sql/pg-protocol/messages'
+import type { Filesystem } from './fs/base.js'
 import type { DumpTarCompressionOptions } from './fs/tarUtils.js'
 
 export type FilesystemType = 'nodefs' | 'idbfs' | 'memoryfs'
@@ -17,11 +20,12 @@ export interface QueryOptions {
   parsers?: ParserOptions
   blob?: Blob | File
   onNotice?: (notice: NoticeMessage) => void
-  setAllTypes?: boolean
+  paramTypes?: number[]
 }
 
 export interface ExecProtocolOptions {
   syncToFs?: boolean
+  throwOnError?: boolean
   onNotice?: (notice: NoticeMessage) => void
 }
 
@@ -64,6 +68,8 @@ export interface PGliteOptions {
   extensions?: Extensions
   loadDataDir?: Blob | File
   initialMemory?: number
+  wasmModule?: WebAssembly.Module
+  fsBundle?: Blob | File
 }
 
 export type PGliteInterface = {

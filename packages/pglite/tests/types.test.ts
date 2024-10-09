@@ -78,46 +78,67 @@ describe('parse', () => {
 // Serialize type tests
 describe('serialize', () => {
   it('string', () => {
-    expect(types.serializeType('test')).toEqual(['test', 0])
+    expect(types.serializers[25]('test')).toEqual('test')
   })
 
-  it('string set all types', () => {
-    expect(types.serializeType('test', true)).toEqual(['test', 25])
+  it('string from number', () => {
+    expect(types.serializers[25](1)).toEqual('1')
+  })
+
+  it('not string', () => {
+    expect(() => types.serializers[25](true)).toThrow()
   })
 
   it('number', () => {
-    expect(types.serializeType(1)).toEqual(['1', 0])
-    expect(types.serializeType(1.1)).toEqual(['1.1', 0])
-  })
-
-  it('number set all types', () => {
-    expect(types.serializeType(1, true)).toEqual(['1', 20])
-    expect(types.serializeType(1.1, true)).toEqual(['1.1', 701])
+    expect(types.serializers[0](1)).toEqual('1')
+    expect(types.serializers[0](1.1)).toEqual('1.1')
   })
 
   it('bigint', () => {
-    expect(types.serializeType(1n)).toEqual(['1', 20])
+    expect(types.serializers[20](1n)).toEqual('1')
   })
 
   it('bool', () => {
-    expect(types.serializeType(true)).toEqual(['t', 16])
+    expect(types.serializers[16](true)).toEqual('t')
+  })
+
+  it('not bool', () => {
+    expect(() => types.serializers[16]('test')).toThrow()
   })
 
   it('date', () => {
-    expect(types.serializeType(new Date('2021-01-01T00:00:00.000Z'))).toEqual([
+    expect(
+      types.serializers[1184](new Date('2021-01-01T00:00:00.000Z')),
+    ).toEqual('2021-01-01T00:00:00.000Z')
+  })
+
+  it('date from number', () => {
+    expect(types.serializers[1184](1672531200000)).toEqual(
+      '2023-01-01T00:00:00.000Z',
+    )
+  })
+
+  it('date from string', () => {
+    expect(types.serializers[1184]('2021-01-01T00:00:00.000Z')).toEqual(
       '2021-01-01T00:00:00.000Z',
-      1184,
-    ])
+    )
+  })
+
+  it('not date', () => {
+    expect(() => types.serializers[1184](true)).toThrow()
   })
 
   it('json', () => {
-    expect(types.serializeType({ test: 1 })).toEqual(['{"test":1}', 114])
+    expect(types.serializers[114]({ test: 1 })).toEqual('{"test":1}')
   })
 
   it('blob', () => {
-    expect(types.serializeType(Uint8Array.from([1, 2, 3]))).toEqual([
+    expect(types.serializers[17](Uint8Array.from([1, 2, 3]))).toEqual(
       '\\x010203',
-      17,
-    ])
+    )
+  })
+
+  it('not blob', () => {
+    expect(() => types.serializers[17](1)).toThrow()
   })
 })

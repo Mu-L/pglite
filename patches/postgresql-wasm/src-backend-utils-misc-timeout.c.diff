@@ -1,5 +1,5 @@
---- postgresql-16.3/src/backend/utils/misc/timeout.c
-+++ postgresql-16.3-wasm/src/backend/utils/misc/timeout.c
+--- postgresql/src/backend/utils/misc/timeout.c
++++ postgresql-wasm/src/backend/utils/misc/timeout.c
 @@ -110,10 +110,20 @@
   * Insert specified timeout reason into the list of active timeouts
   * at the given index.
@@ -29,3 +29,22 @@
  }
  
  /*
+@@ -209,6 +220,10 @@
+ static void
+ schedule_alarm(TimestampTz now)
+ {
++#if defined(__wasi__)
++    puts("# 224: schedule_alarm(TimestampTz now)");
++    (void)signal_due_at;
++#else
+ 	if (num_active_timeouts > 0)
+ 	{
+ 		struct itimerval timeval;
+@@ -347,6 +362,7 @@
+ 			elog(FATAL, "could not enable SIGALRM timer: %m");
+ 		}
+ 	}
++#endif
+ }
+ 
+ 

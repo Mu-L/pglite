@@ -1,39 +1,34 @@
 import { Mutex } from 'async-mutex'
 import PostgresModFactory, { type PostgresMod } from './postgresMod.js'
 import { type Filesystem, parseDataDir, loadFs } from './fs/index.js'
-import { makeLocateFile } from './utils.js'
-import { query as queryTemplate } from './templating.js'
-import { parseResults } from './parse.js'
-import { serializeType } from './types.js'
+import { instantiateWasm, getFsBundle, startWasmDownload } from './utils.js'
 import type {
   DebugLevel,
   PGliteOptions,
   PGliteInterface,
-  Results,
-  Transaction,
-  QueryOptions,
   ExecProtocolOptions,
   PGliteInterfaceExtensions,
   Extensions,
 } from './interface.js'
+import { BasePGlite } from './base.js'
 import { loadExtensionBundle, loadExtensions } from './extensionUtils.js'
 import { loadTar, DumpTarCompressionOptions } from './fs/tarUtils.js'
-import { Buffer } from './polyfills/buffer.js'
-
 import { PGDATA, WASM_PREFIX } from './fs/index.js'
 
 // Importing the source as the built version is not ESM compatible
-import { serialize } from 'pg-protocol/src/index.js'
-import { Parser } from 'pg-protocol/src/parser.js'
+import { serialize, Parser as ProtocolParser } from '@electric-sql/pg-protocol'
 import {
   BackendMessage,
   DatabaseError,
   NoticeMessage,
   CommandCompleteMessage,
   NotificationResponseMessage,
-} from 'pg-protocol/src/messages.js'
+} from '@electric-sql/pg-protocol/messages'
 
-export class PGlite implements PGliteInterface, AsyncDisposable {
+export class PGlite
+  extends BasePGlite
+  implements PGliteInterface, AsyncDisposable
+{
   fs?: Filesystem
   protected mod?: PostgresMod
 
@@ -57,7 +52,7 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
   #extensions: Extensions
   #extensionsClose: Array<() => Promise<void>> = []
 
-  #parser = new Parser()
+  #protocolParser = new ProtocolParser()
 
   // These are the current ArrayBuffer that is being read or written to
   // during a query, such as COPY FROM or COPY TO.
@@ -72,7 +67,7 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
    * @param dataDir The directory to store the database files
    *                Prefix with idb:// to use indexeddb filesystem in the browser
    *                Use memory:// to use in-memory filesystem
-   * @param options Optional options
+   * @param options PGlite options
    */
   constructor(dataDir?: string, options?: PGliteOptions)
 
@@ -86,6 +81,7 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
     dataDirOrPGliteOptions: string | PGliteOptions = {},
     options: PGliteOptions = {},
   ) {
+    super()
     if (typeof dataDirOrPGliteOptions === 'string') {
       options = {
         dataDir: dataDirOrPGliteOptions,
@@ -117,16 +113,42 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
    * Create a new PGlite instance with extensions on the Typescript interface
    * (The main constructor does enable extensions, however due to the limitations
    * of Typescript, the extensions are not available on the instance interface)
+   * @param options PGlite options including the data directory
+   * @returns A promise that resolves to the PGlite instance when it's ready.
+   */
+
+  static async create<O extends PGliteOptions>(
+    options?: O,
+  ): Promise<PGlite & PGliteInterfaceExtensions<O['extensions']>>
+
+  /**
+   * Create a new PGlite instance with extensions on the Typescript interface
+   * (The main constructor does enable extensions, however due to the limitations
+   * of Typescript, the extensions are not available on the instance interface)
    * @param dataDir The directory to store the database files
    *                Prefix with idb:// to use indexeddb filesystem in the browser
    *                Use memory:// to use in-memory filesystem
-   * @param options Optional options
+   * @param options PGlite options
    * @returns A promise that resolves to the PGlite instance when it's ready.
    */
   static async create<O extends PGliteOptions>(
+    dataDir?: string,
+    options?: O,
+  ): Promise<PGlite & PGliteInterfaceExtensions<O['extensions']>>
+
+  static async create<O extends PGliteOptions>(
+    dataDirOrPGliteOptions?: string | O,
     options?: O,
   ): Promise<PGlite & PGliteInterfaceExtensions<O['extensions']>> {
-    const pg = new PGlite(options)
+    const resolvedOpts: PGliteOptions =
+      typeof dataDirOrPGliteOptions === 'string'
+        ? {
+            dataDir: dataDirOrPGliteOptions,
+            ...(options ?? {}),
+          }
+        : dataDirOrPGliteOptions ?? {}
+
+    const pg = new PGlite(resolvedOpts)
     await pg.waitReady
     return pg as any
   }
@@ -157,6 +179,25 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
       ...(this.debug ? ['-d', this.debug.toString()] : []),
     ]
 
+    if (!options.wasmModule) {
+      // Start the wasm download in the background so it's ready when we need it
+      startWasmDownload()
+    }
+
+    // Get the fs bundle
+    // We don't await the loading of the fs bundle at this point as we can continue
+    // with other work.
+    // It's resolved value `fsBundleBuffer` is set and used in `getPreloadedPackage`
+    // which is called via `PostgresModFactory` after we have awaited
+    // `fsBundleBufferPromise` below.
+    const fsBundleBufferPromise = options.fsBundle
+      ? options.fsBundle.arrayBuffer()
+      : getFsBundle()
+    let fsBundleBuffer: ArrayBuffer
+    fsBundleBufferPromise.then((buffer) => {
+      fsBundleBuffer = buffer
+    })
+
     let emscriptenOpts: Partial<PostgresMod> = {
       WASM_PREFIX,
       arguments: args,
@@ -165,7 +206,26 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
       ...(this.debug > 0
         ? { print: console.info, printErr: console.error }
         : { print: () => {}, printErr: () => {} }),
-      locateFile: await makeLocateFile(),
+      instantiateWasm: (imports, successCallback) => {
+        instantiateWasm(imports, options.wasmModule).then(
+          ({ instance, module }) => {
+            // @ts-ignore wrong type in Emscripten typings
+            successCallback(instance, module)
+          },
+        )
+        return {}
+      },
+      getPreloadedPackage: (remotePackageName, remotePackageSize) => {
+        if (remotePackageName === 'postgres.data') {
+          if (fsBundleBuffer.byteLength !== remotePackageSize) {
+            throw new Error(
+              `Invalid FS bundle size: ${fsBundleBuffer.byteLength} !== ${remotePackageSize}`,
+            )
+          }
+          return fsBundleBuffer
+        }
+        throw new Error(`Unknown package: ${remotePackageName}`)
+      },
       preRun: [
         (mod: any) => {
           // Register /dev/blob device
@@ -231,7 +291,11 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
       ],
     }
 
-    emscriptenOpts = await this.fs!.emscriptenOpts(emscriptenOpts)
+    const { emscriptenOpts: amendedEmscriptenOpts } = await this.fs!.init(
+      this,
+      emscriptenOpts,
+    )
+    emscriptenOpts = amendedEmscriptenOpts
 
     // # Setup extensions
     // This is the first step of loading PGlite extensions
@@ -270,11 +334,15 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
     }
     emscriptenOpts['pg_extensions'] = extensionBundlePromises
 
+    // Await the fs bundle - we do this just before calling PostgresModFactory
+    // as it needs the fs bundle to be ready.
+    await fsBundleBufferPromise
+
     // Load the database engine
     this.mod = await PostgresModFactory(emscriptenOpts)
 
     // Sync the filesystem from any previous store
-    await this.fs!.initialSyncFs(this.mod.FS)
+    await this.fs!.initialSyncFs()
 
     // If the user has provided a tarball to load the database from, do that now.
     // We do this after the initial sync so that we can throw if the database
@@ -284,7 +352,7 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
         throw new Error('Database already exists, cannot load from tarball')
       }
       this.#log('pglite: loading data from tarball')
-      await loadTar(this.mod.FS, options.loadDataDir)
+      await loadTar(this.mod.FS, options.loadDataDir, PGDATA)
     }
 
     // Check and log if the database exists
@@ -342,12 +410,15 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
 
     // Sync any changes back to the persisted store (if there is one)
     // TODO: only sync here if initdb did init db.
-    await this.#syncToFs()
-
-    // Set the search path to public for this connection
-    await this.#runExec('SET search_path TO public;')
+    await this.syncToFs()
 
     this.#ready = true
+
+    // Set the search path to public for this connection
+    await this.exec('SET search_path TO public;')
+
+    // Init array types
+    await this._initArrayTypes()
 
     // Init extensions
     for (const initFn of extensionInitFns) {
@@ -381,7 +452,7 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
    * @returns A promise that resolves when the database is closed
    */
   async close() {
-    await this.#checkReady()
+    await this._checkReady()
     this.#closing = true
 
     // Close all extensions
@@ -392,6 +463,7 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
     // Close the database
     try {
       await this.execProtocol(serialize.end())
+      this.mod!._pg_shutdown()
     } catch (e) {
       const err = e as { name: string; status: number }
       if (err.name === 'ExitStatus' && err.status === 0) {
@@ -404,7 +476,7 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
     }
 
     // Close the filesystem
-    await this.fs!.close(this.mod!.FS)
+    await this.fs!.closeFs()
 
     this.#closed = true
     this.#closing = false
@@ -420,260 +492,37 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
   }
 
   /**
-   * Execute a single SQL statement
-   * This uses the "Extended Query" postgres wire protocol message.
-   * @param query The query to execute
-   * @param params Optional parameters for the query
-   * @returns The result of the query
-   */
-  async query<T>(
-    query: string,
-    params?: any[],
-    options?: QueryOptions,
-  ): Promise<Results<T>> {
-    await this.#checkReady()
-    // We wrap the public query method in the transaction mutex to ensure that
-    // only one query can be executed at a time and not concurrently with a
-    // transaction.
-    return await this.#transactionMutex.runExclusive(async () => {
-      return await this.#runQuery<T>(query, params, options)
-    })
-  }
-
-  /**
-   * Execute a single SQL statement like with {@link PGlite.query}, but with a
-   * templated statement where template values will be treated as parameters.
-   *
-   * You can use helpers from `/template` to further format the query with
-   * identifiers, raw SQL, and nested statements.
-   *
-   * This uses the "Extended Query" postgres wire protocol message.
-   *
-   * @param query The query to execute with parameters as template values
-   * @returns The result of the query
-   *
-   * @example
-   * ```ts
-   * const results = await db.sql`SELECT * FROM ${identifier`foo`} WHERE id = ${id}`
-   * ```
-   */
-  async sql<T>(
-    sqlStrings: TemplateStringsArray,
-    ...params: any[]
-  ): Promise<Results<T>> {
-    const { query, params: actualParams } = queryTemplate(sqlStrings, ...params)
-    return await this.query(query, actualParams)
-  }
-
-  /**
-   * Execute a SQL query, this can have multiple statements.
-   * This uses the "Simple Query" postgres wire protocol message.
-   * @param query The query to execute
-   * @returns The result of the query
-   */
-  async exec(query: string, options?: QueryOptions): Promise<Array<Results>> {
-    await this.#checkReady()
-    // We wrap the public exec method in the transaction mutex to ensure that
-    // only one query can be executed at a time and not concurrently with a
-    // transaction.
-    return await this.#transactionMutex.runExclusive(async () => {
-      return await this.#runExec(query, options)
-    })
-  }
-
-  /**
-   * Internal method to execute a query
-   * Not protected by the transaction mutex, so it can be used inside a transaction
-   * @param query The query to execute
-   * @param params Optional parameters for the query
-   * @returns The result of the query
-   */
-  async #runQuery<T>(
-    query: string,
-    params?: any[],
-    options?: QueryOptions,
-  ): Promise<Results<T>> {
-    return await this.#queryMutex.runExclusive(async () => {
-      // We need to parse, bind and execute a query with parameters
-      this.#log('runQuery', query, params, options)
-      await this.#handleBlob(options?.blob)
-      const parsedParams =
-        params?.map((p) => serializeType(p, options?.setAllTypes)) || []
-      let results
-      try {
-        results = [
-          ...(await this.#execProtocolNoSync(
-            serialize.parse({
-              text: query,
-              types: parsedParams.map(([, type]) => type),
-            }),
-            options,
-          )),
-          ...(await this.#execProtocolNoSync(
-            serialize.bind({
-              values: parsedParams.map(([val]) => val),
-            }),
-            options,
-          )),
-          ...(await this.#execProtocolNoSync(
-            serialize.describe({ type: 'P' }),
-            options,
-          )),
-          ...(await this.#execProtocolNoSync(serialize.execute({}), options)),
-        ]
-      } finally {
-        await this.#execProtocolNoSync(serialize.sync(), options)
-      }
-      this.#cleanupBlob()
-      if (!this.#inTransaction) {
-        await this.#syncToFs()
-      }
-      let blob: Blob | undefined
-      if (this.#queryWriteChunks) {
-        blob = new Blob(this.#queryWriteChunks)
-        this.#queryWriteChunks = undefined
-      }
-      return parseResults(
-        results.map(([msg]) => msg),
-        options,
-        blob,
-      )[0] as Results<T>
-    })
-  }
-
-  /**
-   * Internal method to execute a query
-   * Not protected by the transaction mutex, so it can be used inside a transaction
-   * @param query The query to execute
-   * @param params Optional parameters for the query
-   * @returns The result of the query
-   */
-  async #runExec(
-    query: string,
-    options?: QueryOptions,
-  ): Promise<Array<Results>> {
-    return await this.#queryMutex.runExclusive(async () => {
-      // No params so we can just send the query
-      this.#log('runExec', query, options)
-      await this.#handleBlob(options?.blob)
-      let results
-      try {
-        results = await this.#execProtocolNoSync(
-          serialize.query(query),
-          options,
-        )
-      } finally {
-        await this.#execProtocolNoSync(serialize.sync(), options)
-      }
-      this.#cleanupBlob()
-      if (!this.#inTransaction) {
-        await this.#syncToFs()
-      }
-      let blob: Blob | undefined
-      if (this.#queryWriteChunks) {
-        blob = new Blob(this.#queryWriteChunks)
-        this.#queryWriteChunks = undefined
-      }
-      return parseResults(
-        results.map(([msg]) => msg),
-        options,
-        blob,
-      ) as Array<Results>
-    })
-  }
-
-  /**
-   * Execute a transaction
-   * @param callback A callback function that takes a transaction object
-   * @returns The result of the transaction
-   */
-  async transaction<T>(
-    callback: (tx: Transaction) => Promise<T>,
-  ): Promise<T | undefined> {
-    await this.#checkReady()
-    return await this.#transactionMutex.runExclusive(async () => {
-      await this.#runExec('BEGIN')
-
-      // Once a transaction is closed, we throw an error if it's used again
-      let closed = false
-      const checkClosed = () => {
-        if (closed) {
-          throw new Error('Transaction is closed')
-        }
-      }
-
-      try {
-        const tx: Transaction = {
-          query: async <T>(
-            query: string,
-            params?: any[],
-            options?: QueryOptions,
-          ): Promise<Results<T>> => {
-            checkClosed()
-            return await this.#runQuery(query, params, options)
-          },
-          sql: async <T>(
-            sqlStrings: TemplateStringsArray,
-            ...params: any[]
-          ): Promise<Results<T>> => {
-            const { query, params: actualParams } = queryTemplate(
-              sqlStrings,
-              ...params,
-            )
-            return await this.#runQuery(query, actualParams)
-          },
-          exec: async (
-            query: string,
-            options?: QueryOptions,
-          ): Promise<Array<Results>> => {
-            checkClosed()
-            return await this.#runExec(query, options)
-          },
-          rollback: async () => {
-            checkClosed()
-            // Rollback and set the closed flag to prevent further use of this
-            // transaction
-            await this.#runExec('ROLLBACK')
-            closed = true
-          },
-          get closed() {
-            return closed
-          },
-        }
-        const result = await callback(tx)
-        if (!closed) {
-          closed = true
-          await this.#runExec('COMMIT')
-        }
-        return result
-      } catch (e) {
-        if (!closed) {
-          await this.#runExec('ROLLBACK')
-        }
-        throw e
-      }
-    })
-  }
-
-  /**
    * Handle a file attached to the current query
    * @param file The file to handle
    */
-  async #handleBlob(blob?: File | Blob) {
+  async _handleBlob(blob?: File | Blob) {
     this.#queryReadBuffer = blob ? await blob.arrayBuffer() : undefined
   }
 
   /**
    * Cleanup the current file
    */
-  #cleanupBlob() {
+  async _cleanupBlob() {
     this.#queryReadBuffer = undefined
+  }
+
+  /**
+   * Get the written blob from the current query
+   * @returns The written blob
+   */
+  async _getWrittenBlob(): Promise<Blob | undefined> {
+    if (!this.#queryWriteChunks) {
+      return undefined
+    }
+    const blob = new Blob(this.#queryWriteChunks)
+    this.#queryWriteChunks = undefined
+    return blob
   }
 
   /**
    * Wait for the database to be ready
    */
-  async #checkReady() {
+  async _checkReady() {
     if (this.#closing) {
       throw new Error('PGlite is closing')
     }
@@ -721,7 +570,7 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
     const data = mod.HEAPU8.subarray(msg_start, msg_end)
 
     if (syncToFs) {
-      await this.#syncToFs()
+      await this.syncToFs()
     }
 
     return data
@@ -734,15 +583,21 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
    */
   async execProtocol(
     message: Uint8Array,
-    { syncToFs = true, onNotice }: ExecProtocolOptions = {},
+    {
+      syncToFs = true,
+      throwOnError = true,
+      onNotice,
+    }: ExecProtocolOptions = {},
   ): Promise<Array<[BackendMessage, Uint8Array]>> {
     const data = await this.execProtocolRaw(message, { syncToFs })
     const results: Array<[BackendMessage, Uint8Array]> = []
 
-    this.#parser.parse(Buffer.from(data), (msg) => {
+    this.#protocolParser.parse(data, (msg) => {
       if (msg instanceof DatabaseError) {
-        this.#parser = new Parser() // Reset the parser
-        throw msg
+        this.#protocolParser = new ProtocolParser() // Reset the parser
+        if (throwOnError) {
+          throw msg
+        }
         // TODO: Do we want to wrap the error in a custom error?
       } else if (msg instanceof NoticeMessage) {
         if (this.debug > 0) {
@@ -783,18 +638,19 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
     return results
   }
 
-  async #execProtocolNoSync(
-    message: Uint8Array,
-    options: ExecProtocolOptions = {},
-  ): Promise<Array<[BackendMessage, Uint8Array]>> {
-    return await this.execProtocol(message, { ...options, syncToFs: false })
+  /**
+   * Check if the database is in a transaction
+   * @returns True if the database is in a transaction, false otherwise
+   */
+  isInTransaction() {
+    return this.#inTransaction
   }
 
   /**
    * Perform any sync operations implemented by the filesystem, this is
    * run after every query to ensure that the filesystem is synced.
    */
-  async #syncToFs() {
+  async syncToFs() {
     if (this.#fsSyncScheduled) {
       return
     }
@@ -803,7 +659,7 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
     const doSync = async () => {
       await this.#fsSyncMutex.runExclusive(async () => {
         this.#fsSyncScheduled = false
-        await this.fs!.syncToFs(this.mod!.FS, this.#relaxedDurability)
+        await this.fs!.syncToFs(this.#relaxedDurability)
       })
     }
 
@@ -833,7 +689,7 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
       this.#notifyListeners.set(channel, new Set())
     }
     this.#notifyListeners.get(channel)!.add(callback)
-    await this.exec(`LISTEN ${channel}`)
+    await this.exec(`LISTEN "${channel}"`)
     return async () => {
       await this.unlisten(channel, callback)
     }
@@ -848,11 +704,11 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
     if (callback) {
       this.#notifyListeners.get(channel)?.delete(callback)
       if (this.#notifyListeners.get(channel)?.size === 0) {
-        await this.exec(`UNLISTEN ${channel}`)
+        await this.exec(`UNLISTEN "${channel}"`)
         this.#notifyListeners.delete(channel)
       }
     } else {
-      await this.exec(`UNLISTEN ${channel}`)
+      await this.exec(`UNLISTEN "${channel}"`)
       this.#notifyListeners.delete(channel)
     }
   }
@@ -887,6 +743,24 @@ export class PGlite implements PGliteInterface, AsyncDisposable {
     compression?: DumpTarCompressionOptions,
   ): Promise<File | Blob> {
     const dbname = this.dataDir?.split('/').pop() ?? 'pgdata'
-    return this.fs!.dumpTar(this.mod!.FS, dbname, compression)
+    return this.fs!.dumpTar(dbname, compression)
+  }
+
+  /**
+   * Run a function in a mutex that's exclusive to queries
+   * @param fn The query to run
+   * @returns The result of the query
+   */
+  _runExclusiveQuery<T>(fn: () => Promise<T>): Promise<T> {
+    return this.#queryMutex.runExclusive(fn)
+  }
+
+  /**
+   * Run a function in a mutex that's exclusive to transactions
+   * @param fn The function to run
+   * @returns The result of the function
+   */
+  _runExclusiveTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    return this.#transactionMutex.runExclusive(fn)
   }
 }

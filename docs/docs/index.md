@@ -1,8 +1,8 @@
 # Getting started with PGlite
 
-PGlite can be used in both Node/Bun or the browser, and with any JavaScript framework.
+PGlite can be used in both Node/Bun/Deno or the browser, and with any JavaScript framework.
 
-## Install and start in Node/Bun
+## Install and start in Node/Bun/Deno
 
 Install into your project:
 
@@ -22,6 +22,10 @@ yarn add @electric-sql/pglite
 
 ```bash [bun]
 bun install @electric-sql/pglite
+```
+
+```bash [deno]
+deno add npm:@electric-sql/pglite
 ```
 
 :::
@@ -132,6 +136,8 @@ const ret = await db.query(
 - PGlite has a number of built-in [virtual file systems](./filesystems.md) to provide persistance for your database.
 
 - There are [framework hooks](./framework-hooks/react.md) to make working with PGlite within React and Vue much easier with less boilerplate.
+
+- For help configuring PGlite with your bundler, see the [bundler support](./bundler-support.md) page.
 
 - As PGlite only has a single exclusive connection to the database, we provide a [multi-tab worker](./multi-tab-worker.md) to enable sharing a PGlite instance between multiple browser tabs.
 

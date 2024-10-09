@@ -4,8 +4,14 @@
 # expressed in EMSDK MB
 export CMA_MB=${CMA_MB:-64}
 
-export PGVERSION=${PGVERSION:-16.3}
 export CI=${CI:-false}
+
+if $CI
+then
+    . .buildconfig
+fi
+
+export PG_VERSION=${PG_VERSION:-16.4}
 export WORKSPACE=${GITHUB_WORKSPACE:-$(pwd)}
 export PGROOT=${PGROOT:-/tmp/pglite}
 export WEBROOT=${WEBROOT:-/tmp/web}
@@ -14,9 +20,13 @@ export PGDATA=${PGROOT}/base
 export PGUSER=${PGUSER:-postgres}
 export PGPATCH=${WORKSPACE}/patches
 export TOTAL_MEMORY=${TOTAL_MEMORY:-128MB}
+export WASI=${WASI:-false}
+
 
 # exit on error
 EOE=false
+
+mkdir -p /tmp/sdk
 
 # the default is a user writeable path.
 if mkdir -p ${PGROOT}/sdk
@@ -42,36 +52,9 @@ fi
 
 export PGPASS
 
-# default to web/release size optim.
-if $DEBUG
-then
-    export PGDEBUG=""
-    export CDEBUG="-g0 -O0"
-    cat > /tmp/pgdebug.h << END
-#ifndef I_PGDEBUG
-#define I_PGDEBUG
-#define WASM_USERNAME "$PGUSER"
-#define PGDEBUG 1
-#define PDEBUG(string) puts(string)
-#define JSDEBUG(string) {EM_ASM({ console.log(string); });}
-#define ADEBUG(string) { PDEBUG(string); JSDEBUG(string) }
-#endif
-END
 
-else
-    export PGDEBUG=""
-    export CDEBUG="-g0 -O2"
-    cat > /tmp/pgdebug.h << END
-#ifndef I_PGDEBUG
-#define I_PGDEBUG
-#define WASM_USERNAME "$PGUSER"
-#define PDEBUG(string)
-#define JSDEBUG(string)
-#define ADEBUG(string)
-#define PGDEBUG 0
-#endif
-END
-fi
+export PG_DEBUG_HEADER="${PGROOT}/include/pg_debug.h"
+
 
 echo "
 System node/pnpm ( may interfer) :
@@ -118,14 +101,16 @@ else
     # pass the "kernel" contiguous memory zone size to the C compiler.
     CC_PGLITE="-DCMA_MB=${CMA_MB}"
 
-    # these are files that shadow original portion of pg core, with minimal changes
-    # to original code
-    # some may be included multiple time
-    CC_PGLITE="-DPATCH_MAIN=${WORKSPACE}/patches/pg_main.c ${CC_PGLITE}"
-    CC_PGLITE="-DPATCH_LOOP=${WORKSPACE}/patches/interactive_one.c ${CC_PGLITE}"
-    CC_PGLITE="-DPATCH_PLUGIN=${WORKSPACE}/patches/pg_plugin.h ${CC_PGLITE}"
-
 fi
+
+# these are files that shadow original portion of pg core, with minimal changes
+# to original code
+# some may be included multiple time
+CC_PGLITE="-DPATCH_MAIN=${WORKSPACE}/patches/pg_main.c ${CC_PGLITE}"
+CC_PGLITE="-DPATCH_LOOP=${WORKSPACE}/patches/interactive_one.c ${CC_PGLITE}"
+CC_PGLITE="-DPATCH_PLUGIN=${WORKSPACE}/patches/pg_plugin.h ${CC_PGLITE}"
+CC_PGLITE="-DPATCH_PG_DEBUG=${PG_DEBUG_HEADER} ${CC_PGLITE}"
+
 
 export CC_PGLITE
 export PGPRELOAD="\
@@ -192,7 +177,7 @@ export OBJDUMP
 
 # ========================= pg core configuration ============================
 
-
+# testing postgres.js file instead of ${PGROOT}/pgopts.sh because build should not have failed.
 if [ -f ${WEBROOT}/postgres.js ]
 then
     echo using current from ${WEBROOT}
@@ -201,8 +186,52 @@ then
 
 else
 
+    # default to web/release size optim.
+
+    mkdir -p ${PGROOT}/include
+    if $DEBUG
+    then
+        export PGDEBUG=""
+        export CDEBUG="-g3 -O0"
+        export LDEBUG="-g3 -O0"
+        cat > ${PG_DEBUG_HEADER} << END
+#ifndef I_PGDEBUG
+#define I_PGDEBUG
+#define WASM_USERNAME "$PGUSER"
+#define PGDEBUG 1
+#define PDEBUG(string) puts(string)
+#define JSDEBUG(string) {EM_ASM({ console.log(string); });}
+#define ADEBUG(string) { PDEBUG(string); JSDEBUG(string) }
+#endif
+END
+
+    else
+        export PGDEBUG=""
+        export CDEBUG="-g3 -O0"
+        export LDEBUG="-g3 -O0"
+        cat > ${PG_DEBUG_HEADER} << END
+#ifndef I_PGDEBUG
+#define I_PGDEBUG
+#define WASM_USERNAME "$PGUSER"
+#define PDEBUG(string)
+#define JSDEBUG(string)
+#define ADEBUG(string)
+#define PGDEBUG 0
+#endif
+END
+    fi
+
+    mkdir -p ${PGROOT}/include/postgresql/server
+    cp ${PG_DEBUG_HEADER} ${PGROOT}/include/
+    cp ${PG_DEBUG_HEADER} ${PGROOT}/include/postgresql
+    cp ${PG_DEBUG_HEADER} ${PGROOT}/include/postgresql/server
+
     # store all pg options that have impact on cmd line initdb/boot
     cat > ${PGROOT}/pgopts.sh <<END
+export CDEBUG="$CDEBUG"
+export LDEBUG="$LDEBUG"
+export PGDEBUG="$PGDEBUG"
+export PG_DEBUG_HEADER=$PG_DEBUG_HEADER
 export PGOPTS="\\
  -c log_checkpoints=false \\
  -c dynamic_shared_memory_type=posix \\
@@ -238,19 +267,19 @@ UTF-8
 END
 
 
-    # to get same path for wasm-shared link tool in the path
+    # to get same path for wasm shared link tools in the path
     # for extensions building.
     # we always symlink in-tree build to "postgresql" folder
-    if echo $PGVERSION|grep -q ^16
+    if echo $PG_VERSION|grep -q ^16
     then
         . cibuild/pg-16.x.sh
     else
         . cibuild/pg-git.sh
     fi
 
-    # install wasm-shared along with pg config  tool
+    # install emsdk-shared along with pg config  tool
     # for building user ext.
-    cp build/postgres/bin/wasm-shared $PGROOT/bin/
+    cp build/postgres/bin/emsdk-shared $PGROOT/bin/
 
     export PGLITE=$(pwd)/packages/pglite
 
@@ -260,7 +289,7 @@ END
 
 fi
 
-# put wasm-shared the pg extension linker from build dir in the path
+# put emsdk-shared the pg extension linker from build dir in the path
 # and also pg_config from the install dir.
 export PATH=${WORKSPACE}/build/postgres/bin:${PGROOT}/bin:$PATH
 
@@ -326,56 +355,34 @@ then
 
 fi
 
-if ${EXTRA_EXT:-true}
+ if echo " $*"|grep -q " extra"
 then
-    if echo " $*"|grep -q " vector"
-    then
-        echo "====================== vector : $(pwd) ================="
-
-        pushd build
-
-            # [ -d pgvector ] || git clone --no-tags --depth 1 --single-branch --branch master https://github.com/pgvector/pgvector
-
-            if [ -d pgvector ]
+    for extra_ext in  ${EXTRA_EXT:-"vector"}
+    do
+        if $CI
+        then
+            if [ -d $PREFIX/include/X11 ]
             then
-                echo using local pgvector
+                echo -n
             else
-                wget -c -q https://github.com/pgvector/pgvector/archive/refs/tags/v0.7.3.tar.gz -Opgvector.tar.gz
-                tar xvfz pgvector.tar.gz && rm pgvector.tar.gz
-                mv pgvector-?.?.? pgvector
+                # install EXTRA sdk
+                . /etc/lsb-release
+                DISTRIB="${DISTRIB_ID}-${DISTRIB_RELEASE}"
+                CIVER=${CIVER:-$DISTRIB}
+                SDK_URL=https://github.com/pygame-web/python-wasm-sdk-extra/releases/download/$SDK_VERSION/python-emsdk-sdk-extra-${CIVER}.tar.lz4
+                echo "Installing $SDK_URL"
+                curl -sL --retry 5 $SDK_URL | tar xvP --use-compress-program=lz4 | pv -p -l -s 15000 >/dev/null
+                chmod +x ./extra/*.sh
             fi
+        fi
+        echo "======================= ${extra_ext} : $(pwd) ==================="
 
-            pushd pgvector
-                # path for wasm-shared already set to (pwd:pg build dir)/bin
-                # OPTFLAGS="" turns off arch optim (sse/neon).
-                PG_CONFIG=${PGROOT}/bin/pg_config emmake make OPTFLAGS="" install || exit 276
-                cp sql/vector.sql sql/vector--0.7.3.sql ${PGROOT}/share/postgresql/extension
-                rm ${PGROOT}/share/postgresql/extension/vector--?.?.?--?.?.?.sql ${PGROOT}/share/postgresql/extension/vector.sql
-            popd
-
-        popd
+        ./extra/${extra_ext}.sh || exit 400
 
         python3 cibuild/pack_extension.py
-
-    fi
-
-    if echo " $*"|grep -q " postgis"
-    then
-        echo "======================= postgis : $(pwd) ==================="
-
-        ./cibuild/postgis.sh
-
-        python3 cibuild/pack_extension.py
-    fi
-
-    if echo " $*"|grep -q " quack"
-    then
-        echo "================================================="
-        ./cibuild/pg_quack.sh || exit 299
-        cp $PGROOT/lib/libduckdb.so /tmp/
-        python3 cibuild/pack_extension.py
-    fi
+    done
 fi
+
 # ===========================================================================
 # ===========================================================================
 #                               PGLite
@@ -395,10 +402,14 @@ then
 
     # remove versionned symlinks
     rm ${PGROOT}/lib/lib*.so.? 2>/dev/null
-    if $CI
+
+    if $WASI
     then
-        tar -cpRz ${PGROOT} > /tmp/sdk/postgres-${PGVERSION}.tar.gz
+        tar -cpRz ${PGROOT} > /tmp/sdk/postgres-${PG_VERSION}-wasisdk.tar.gz
+    else
+        tar -cpRz ${PGROOT} > /tmp/sdk/postgres-${PG_VERSION}-emsdk.tar.gz
     fi
+
 fi
 
 # run linkweb after node build because it may remove some wasm .so used by node from fs
@@ -428,20 +439,81 @@ do
             # TODO: SAMs NOTE - Not using this in GitHub action as it doesnt resolve pnpm correctly
             # replaced with pglite-prep and pglite-bundle-sdk
 
-            . cibuild/pglite-ts.sh
+            pushd ${PGLITE}
+                pnpm install --frozen-lockfile
 
-            # copy needed files for a minimal js/ts/extension build
-            # NB: ext can't use NODE FS if main not linked with -lnodefs.js -lidbfs.js
+                mkdir -p $PGLITE/release
+                rm $PGLITE/release/* 2>/dev/null
+
+
+                # copy packed extensions for dist
+                echo "
+
+__________________________ enabled extensions (dlfcn)_____________________________
+"
+    cp -vf ${WEBROOT}/*.tar.gz ${PGLITE}/release/
+echo "
+__________________________________________________________________________________
+"
+
+                # copy wasm web prebuilt artifacts to release folder
+                # TODO: get them from web for nosdk systems.
+
+                cp -vf ${WEBROOT}/postgres.{js,data,wasm} ${PGLITE}/release/
+
+                # debug CI does not use pnpm/npm for building pg, so call the typescript build
+                # part from here
+                pnpm --filter "pglite^..." build || exit 450
+
+                pnpm pack || exit 31
+                packed=$(echo -n electric-sql-pglite-*.tgz)
+
+                mv $packed /tmp/sdk/pg${PG_VERSION}-${packed}
+
+                # for repl demo
+#                mkdir -p /tmp/web/pglite
+
+                #cp -r ${PGLITE}/dist ${WEBROOT}/pglite/
+                #cp -r ${PGLITE}/examples ${WEBROOT}/pglite/
+
+#                for dir in /tmp/web ${WEBROOT}/pglite/examples
+#                do
+#                    pushd "$dir"
+#                    cp ${PGLITE}/dist/postgres.data ./
+#                    popd
+#                done
+
+                echo "<html>
+                <body>
+                    <ul>
+                        <li><a href=./pglite/examples/repl.html>PGlite REPL (in-memory)</a></li>
+                        <li><a href=./pglite/examples/repl-idb.html>PGlite REPL (indexedDB)</a></li>
+                        <li><a href=./pglite/examples/notify.html>list/notify test</a></li>
+                        <li><a href=./pglite/examples/index.html>All PGlite Examples</a></li>
+                        <li><a href=./pglite/benchmark/index.html>Benchmarks</a> / <a href=./pglite/benchmark/rtt.html>RTT Benchmarks</a></li>
+                        <li><a href=./postgres.html>Postgres xterm REPL</a></li>
+                    </ul>
+                </body>
+                </html>" > ${WEBROOT}/index.html
+
+            popd
 
             mkdir -p ${PGROOT}/sdk/packages/ /tmp/web/pglite /tmp/web/repl/
             cp -r $PGLITE ${PGROOT}/sdk/packages/
 
-            mkdir /tmp/web/repl/dist-webcomponent -p
-            cp -r ${WORKSPACE}/packages/repl/dist-webcomponent /tmp/web/repl/
+            #mkdir /tmp/web/repl/dist-webcomponent -p
+            #cp -r ${WORKSPACE}/packages/pglite-repl/dist-webcomponent /tmp/web/repl/
 
             if $CI
             then
-                tar -cpRz ${PGROOT} > /tmp/sdk/pglite-pg${PGVERSION}.tar.gz
+                tar -cpRz ${PGROOT} > /tmp/sdk/pglite-pg${PG_VERSION}.tar.gz
+
+                # build sdk (node)
+                cp /tmp/sdk/postgres-${PG_VERSION}.tar.gz ${WEBROOT}/
+
+                # pglite (web)
+                cp /tmp/sdk/pglite-pg${PG_VERSION}.tar.gz ${WEBROOT}/
+
             fi
 
             du -hs ${WEBROOT}/*
@@ -455,25 +527,27 @@ do
             pnpm run build 2>&1 >/dev/null
             if pnpm exec playwright install --with-deps 2>&1 >/dev/null
             then
-                pnpm run test || exit 429
+                pnpm --filter "pglite^..." test || exit 534
+                pnpm test:web || pnpm test:web || pnpm test:web || exit 535
             else
-                echo "failed to install test env"
-                pnpm run test || exit 432
+                echo "failed to install web-test env"
+                pnpm --filter "pglite^..." test || exit 538
             fi
+            pnpm pack
             popd
         ;;
 
         pglite-prep) echo "==================== pglite-prep  =========================="
             mkdir -p $PGLITE/release
-            rm $PGLITE/release/*
+            #rm $PGLITE/release/*
 
             # copy packed extensions
-            cp ${WEBROOT}/*.tar.gz ${PGLITE}/release/
+            cp -vf ${WEBROOT}/*.tar.gz ${PGLITE}/release/
             cp -vf ${WEBROOT}/postgres.{js,data,wasm} $PGLITE/release/
         ;;
 
         pglite-bundle-interim) echo "================== pglite-bundle-interim ======================"
-            tar -cpRz ${PGLITE}/release > /tmp/sdk/pglite-interim-${PGVERSION}.tar.gz
+            tar -cpRz ${PGLITE}/release > /tmp/sdk/pglite-interim-${PG_VERSION}.tar.gz
         ;;
 
         demo-site) echo "==================== demo-site =========================="

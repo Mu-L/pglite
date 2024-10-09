@@ -12,6 +12,13 @@ import type {
 } from './interface'
 import { uuid, formatQuery } from '../utils.js'
 
+export type {
+  LiveNamespace,
+  LiveQueryReturn,
+  LiveChangesReturn,
+  Change,
+} from './interface.js'
+
 const MAX_RETRIES = 5
 
 const setup = async (pg: PGliteInterface, _emscriptenOpts: any) => {
@@ -33,7 +40,7 @@ const setup = async (pg: PGliteInterface, _emscriptenOpts: any) => {
       const init = async () => {
         await pg.transaction(async (tx) => {
           // Create a temporary view with the query
-          const formattedQuery = await formatQuery(tx, query, params)
+          const formattedQuery = await formatQuery(pg, query, params, tx)
           await tx.query(
             `CREATE OR REPLACE TEMP VIEW live_query_${id}_view AS ${formattedQuery}`,
           )
@@ -124,7 +131,7 @@ const setup = async (pg: PGliteInterface, _emscriptenOpts: any) => {
       const init = async () => {
         await pg.transaction(async (tx) => {
           // Create a temporary view with the query
-          const formattedQuery = await formatQuery(tx, query, params)
+          const formattedQuery = await formatQuery(pg, query, params, tx)
           await tx.query(
             `CREATE OR REPLACE TEMP VIEW live_query_${id}_view AS ${formattedQuery}`,
           )
@@ -182,7 +189,7 @@ const setup = async (pg: PGliteInterface, _emscriptenOpts: any) => {
                         if (column_name === key) {
                           return `prev."${column_name}" AS "${column_name}"`
                         } else {
-                          return `NULL::${data_type === 'USER-DEFINED' ? udt_name : data_type} AS "${column_name}"`
+                          return `NULL${data_type === 'USER-DEFINED' ? `::${udt_name}` : ``} AS "${column_name}"`
                         }
                       })
                       .join(',\n')},
@@ -201,7 +208,7 @@ const setup = async (pg: PGliteInterface, _emscriptenOpts: any) => {
                           : `CASE 
                               WHEN curr."${column_name}" IS DISTINCT FROM prev."${column_name}" 
                               THEN curr."${column_name}"
-                              ELSE NULL::${data_type === 'USER-DEFINED' ? udt_name : data_type} 
+                              ELSE NULL${data_type === 'USER-DEFINED' ? `::${udt_name}` : ``}
                               END AS "${column_name}"`,
                       )
                       .join(',\n')},
@@ -483,15 +490,15 @@ async function addNotifyTriggersToTables(
     )
     .map((table) => {
       return `
-      CREATE OR REPLACE FUNCTION _notify_${table.schema_name}_${table.table_name}() RETURNS TRIGGER AS $$
+      CREATE OR REPLACE FUNCTION "_notify_${table.schema_name}_${table.table_name}"() RETURNS TRIGGER AS $$
       BEGIN
         PERFORM pg_notify('table_change__${table.schema_name}__${table.table_name}', '');
         RETURN NULL;
       END;
       $$ LANGUAGE plpgsql;
-      CREATE OR REPLACE TRIGGER _notify_trigger_${table.schema_name}_${table.table_name}
-      AFTER INSERT OR UPDATE OR DELETE ON ${table.schema_name}.${table.table_name}
-      FOR EACH STATEMENT EXECUTE FUNCTION _notify_${table.schema_name}_${table.table_name}();
+      CREATE OR REPLACE TRIGGER "_notify_trigger_${table.schema_name}_${table.table_name}"
+      AFTER INSERT OR UPDATE OR DELETE ON "${table.schema_name}"."${table.table_name}"
+      FOR EACH STATEMENT EXECUTE FUNCTION "_notify_${table.schema_name}_${table.table_name}"();
       `
     })
     .join('\n')
